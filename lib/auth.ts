@@ -14,6 +14,8 @@ const GMAIL_SCOPES = [
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as any,
+  secret: process.env.NEXTAUTH_SECRET,
+  debug: process.env.NEXTAUTH_DEBUG === "true",
   logger: {
     error(code, metadata) {
       console.error("[nextauth][error]", code, metadata);
