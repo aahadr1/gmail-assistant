@@ -7,7 +7,8 @@ import { prisma } from "@/lib/db/prisma";
 
 // Vercel Serverless Function tuning (prevents premature 504s for tool-heavy requests)
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Note: Vercel enforces a hard cap depending on your plan (e.g. Pro max 300s).
+export const maxDuration = 300;
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
@@ -22,7 +23,7 @@ function getOpenAI() {
 export async function POST(req: NextRequest) {
   try {
     const startedAt = Date.now();
-    const TIME_BUDGET_MS = 50_000; // stay under platform timeout; return a friendly message instead of a 504
+    const TIME_BUDGET_MS = 280_000; // stay under platform timeout; return a friendly message instead of a 504
 
     const session = await getServerSession(authOptions);
     
@@ -91,7 +92,7 @@ Key guidelines:
 
     const currentMessages = [systemMessage, ...messages];
     let iterations = 0;
-    const MAX_ITERATIONS = 6;
+    const MAX_ITERATIONS = 10;
     let finalResponse = "";
     let lastVerificationRunId: string | null = null;
     let lastProposedAction: any = null;
@@ -116,7 +117,7 @@ Key guidelines:
           tool_choice: "auto",
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("LLM request timed out")), 20_000)
+          setTimeout(() => reject(new Error("LLM request timed out")), 60_000)
         ),
       ]);
 
@@ -143,7 +144,7 @@ Key guidelines:
           const result = await Promise.race([
             executeTool(toolName, toolArgs),
             new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`Tool timed out: ${toolName}`)), 25_000)
+              setTimeout(() => reject(new Error(`Tool timed out: ${toolName}`)), 120_000)
             ),
           ]);
           if (result?.verificationRunId && typeof result.verificationRunId === "string") {
