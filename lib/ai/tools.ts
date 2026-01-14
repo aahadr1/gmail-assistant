@@ -38,6 +38,29 @@ export const tools = [
   {
     type: "function" as const,
     function: {
+      name: "removeLabelFromAllMessages",
+      description:
+        "Deterministically removes a Gmail label from ALL messages that currently have that label (paged up to 1000). This does NOT use AI verification because it's label-indexed and exhaustive.",
+      parameters: {
+        type: "object",
+        properties: {
+          labelName: { type: "string", description: 'The label name to remove everywhere (e.g. "WATRIN")' },
+          maxResults: {
+            type: "number",
+            description: "Max total messages to modify (default 1000, max 1000).",
+          },
+          confirm: {
+            type: "boolean",
+            description: "Must be true to execute the removal (safety for bulk operations).",
+          },
+        },
+        required: ["labelName"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "searchAndVerifyMessages",
       description:
         "Search Gmail using one or more Gmail query strings (paged up to 1000), fetch metadata for all candidates, then run an AI verification step to keep only relevant emails. Returns a verificationRunId and the verified message ids.",
@@ -290,6 +313,86 @@ export const tools = [
 export async function executeTool(toolName: string, args: any): Promise<any> {
   try {
     switch (toolName) {
+      case "removeLabelFromAllMessages": {
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) throw new Error("Unauthorized");
+
+        const labelName: string = String(args.labelName || "").trim();
+        if (!labelName) throw new Error("labelName is required");
+
+        const maxResults = Math.min(Number(args.maxResults || 1000), 1000);
+
+        const labels = await gmailLabels.listLabels();
+        const label = labels.find((l) => l.name.toLowerCase() === labelName.toLowerCase());
+        if (!label) {
+          await logAudit("remove_label_all", "success", { labelName, maxResults, removedCount: 0, note: "label_not_found" });
+          return { success: true, labelName, removedCount: 0, message: `Label "${labelName}" not found; nothing to remove.` };
+        }
+
+        // For Gmail search syntax, quote labels with spaces.
+        const labelQuery = /\s/.test(label.name) ? `"${label.name.replaceAll('"', '\\"')}"` : label.name;
+        const { messageIds, resultSizeEstimate } = await gmailMessages.searchMessages({ label: labelQuery }, maxResults);
+
+        if (!messageIds.length) {
+          await logAudit("remove_label_all", "success", {
+            labelName: label.name,
+            labelId: label.id,
+            maxResults,
+            removedCount: 0,
+            resultSizeEstimate,
+          });
+          return { success: true, labelName: label.name, labelId: label.id, removedCount: 0, resultSizeEstimate };
+        }
+
+        if (args?.confirm !== true) {
+          return {
+            requiresConfirmation: true,
+            message: `About to remove label "${label.name}" from ${messageIds.length} emails. Reply exactly: CONFIRM`,
+            proposed: { tool: "removeLabelFromAllMessages", labelName: label.name, maxResults, confirm: true },
+            labelId: label.id,
+            candidateCount: messageIds.length,
+            resultSizeEstimate,
+          };
+        }
+
+        await gmailMessages.modifyMessageLabels(messageIds, undefined, [label.id]);
+
+        // Best-effort verification: check a few messages no longer contain the label id.
+        let verification: any = null;
+        try {
+          const sampleIds = messageIds.slice(0, 3);
+          const sample = await Promise.all(
+            sampleIds.map(async (id) => {
+              const labelsNow = await gmailMessages.getMessageLabelIds(id);
+              return { id, hasLabel: labelsNow.includes(label.id) };
+            })
+          );
+          verification = {
+            sampleSize: sample.length,
+            removedVerifiedCount: sample.filter((s) => !s.hasLabel).length,
+            sample,
+          };
+        } catch (e) {
+          verification = { error: e instanceof Error ? e.message : String(e) };
+        }
+
+        await logAudit(
+          "remove_label_all",
+          "success",
+          { labelName: label.name, labelId: label.id, maxResults, removedCount: messageIds.length, resultSizeEstimate, verification },
+          undefined,
+          label.id
+        );
+
+        return {
+          success: true,
+          labelName: label.name,
+          labelId: label.id,
+          removedCount: messageIds.length,
+          resultSizeEstimate,
+          verification,
+        };
+      }
       case "searchAndVerifyMessages": {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) throw new Error("Unauthorized");
