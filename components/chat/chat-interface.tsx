@@ -9,6 +9,7 @@ import { Send } from "lucide-react";
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -18,19 +19,21 @@ export function ChatInterface() {
 
     const userMessage = input.trim();
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    const nextMessages = [...messages, { role: "user", content: userMessage }];
+    setMessages(nextMessages);
     setIsLoading(true);
 
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, { role: "user", content: userMessage }] }),
+        body: JSON.stringify({ messages: nextMessages, conversationId }),
       });
 
       if (!response.ok) throw new Error("Failed to get response");
 
       const data = await response.json();
+      if (data?.conversationId) setConversationId(data.conversationId);
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
     } catch (error) {
       console.error("Chat error:", error);

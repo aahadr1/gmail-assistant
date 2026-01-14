@@ -201,7 +201,8 @@ export const tools = [
             description: "Must be true to execute bulk modifications.",
           },
         },
-        required: ["messageIds"],
+        description:
+          "Provide either messageIds OR verificationRunId. If both are provided, verificationRunId takes precedence.",
       },
     },
   },
@@ -407,6 +408,7 @@ export async function executeTool(toolName: string, args: any): Promise<any> {
       case "applyLabels": {
         let { messageIds } = args;
         const { addLabelIds, removeLabelIds } = args;
+        if (!Array.isArray(messageIds)) messageIds = [];
 
         // Enforce verification for large batches even if user passes messageIds.
         if (!args.verificationRunId && Array.isArray(messageIds) && messageIds.length > 20) {
@@ -425,7 +427,11 @@ export async function executeTool(toolName: string, args: any): Promise<any> {
           const run = await (prisma as any).verificationRun.findFirst({
             where: { id: args.verificationRunId, userId: session.user.id },
           });
-          if (!run) throw new Error("Invalid verificationRunId");
+          if (!run) {
+            throw new Error(
+              "Invalid verificationRunId. This usually happens if the chat lost context between turns. Please re-run searchAndVerifyMessages, then retry applyLabels using the returned verificationRunId."
+            );
+          }
 
           messageIds = (run.verifiedMessageIds as any as string[]) || [];
         }

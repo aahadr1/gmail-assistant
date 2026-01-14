@@ -64,6 +64,7 @@ Key guidelines:
 - For multi-email requests, ALWAYS use searchAndVerifyMessages (NOT searchMessages) so results are verified before any action.
 - When searching emails, prefer multiple tighter Gmail queries instead of one broad OR query.
 - After searchAndVerifyMessages, only operate on verified ids (use verificationRunId for follow-up actions).
+- ALWAYS include verificationRunId in your response whenever searchAndVerifyMessages (or a confirmation proposal) returns one.
 - Always organize results clearly (by date, sender, or topic)
 - Before sending emails or making destructive changes (trash/delete), explain what you're about to do
 - Be concise but thorough in your responses
@@ -74,7 +75,7 @@ Key guidelines:
 - For bulk labeling: first show a small sample (subjects/senders/dates) and ask the user to reply CONFIRM. Then call applyLabels with confirm=true and include verificationRunId.
 - Respond in a structured way with these sections and IDs:
   1) SearchPlan (gmailQueries[])
-  2) VerificationSummary (candidateCount, verifiedCount, rejectedCount)
+  2) VerificationSummary (verificationRunId, candidateCount, verifiedCount, rejectedCount)
   3) SampleVerified (up to 10 items with id, date, from, subject)
   4) NextActions (what you can do next, requiring confirmation if modifying)
 - Format dates clearly and handle year-based searches (e.g., "2022" means after:2022/01/01 before:2023/01/01)`,
@@ -84,6 +85,8 @@ Key guidelines:
     let iterations = 0;
     const MAX_ITERATIONS = 10;
     let finalResponse = "";
+    let lastVerificationRunId: string | null = null;
+    let lastProposedAction: any = null;
 
     // Tool calling loop
     const openai = getOpenAI();
@@ -119,6 +122,15 @@ Key guidelines:
 
         try {
           const result = await executeTool(toolName, toolArgs);
+          if (result?.verificationRunId && typeof result.verificationRunId === "string") {
+            lastVerificationRunId = result.verificationRunId;
+          }
+          if (result?.requiresConfirmation && result?.proposed) {
+            lastProposedAction = result.proposed;
+            if (result.proposed?.verificationRunId && typeof result.proposed.verificationRunId === "string") {
+              lastVerificationRunId = result.proposed.verificationRunId;
+            }
+          }
 
           // Add tool response to messages
           currentMessages.push({
@@ -137,6 +149,28 @@ Key guidelines:
             }),
           });
         }
+      }
+    }
+
+    // If we have important IDs/pending actions, make sure the user sees them so the next turn can reference them.
+    if (finalResponse) {
+      const shouldAppendVerificationRunId =
+        lastVerificationRunId && !finalResponse.toLowerCase().includes("verificationrunid");
+      const shouldAppendPending =
+        lastProposedAction && !finalResponse.toLowerCase().includes("pendingaction");
+
+      if (shouldAppendVerificationRunId || shouldAppendPending) {
+        finalResponse += `\n\n---\n`;
+      }
+      if (shouldAppendVerificationRunId) {
+        finalResponse += `VerificationRunId: ${lastVerificationRunId}\n`;
+      }
+      if (shouldAppendPending) {
+        finalResponse += `PendingAction (use this exact payload on CONFIRM):\n${JSON.stringify(
+          lastProposedAction,
+          null,
+          2
+        )}\n`;
       }
     }
 
