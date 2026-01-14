@@ -1,0 +1,158 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  refresh_token_expires_in Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  // Encrypted Gmail refresh token (AES-256-GCM)
+  encrypted_refresh_token String? @db.Text
+  refresh_token_iv        String? // Initialization vector for encryption
+  refresh_token_tag       String? // Authentication tag for GCM
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+  conversations Conversation[]
+  auditLogs     AuditLog[]
+  verificationRuns VerificationRun[]
+
+  @@map("users")
+}
+
+model VerificationRun {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Original user request that triggered the search/verification
+  userRequest String @db.Text @map("user_request")
+
+  // One or more Gmail query strings used to gather candidates
+  gmailQueries Json @map("gmail_queries")
+
+  // Candidate message ids (union of all queries, capped to 1000)
+  candidateMessageIds Json @map("candidate_message_ids")
+  candidateCount      Int  @map("candidate_count")
+
+  // Notes from verification (for debugging/explainability)
+  verificationNotes String? @db.Text @map("verification_notes")
+
+  // Verified in-scope message ids
+  verifiedMessageIds Json @map("verified_message_ids")
+  verifiedCount      Int  @map("verified_count")
+
+  // Explicitly rejected as out-of-scope
+  rejectedMessageIds Json @map("rejected_message_ids")
+  rejectedCount      Int  @map("rejected_count")
+
+  // Unclear/needs review
+  unsureMessageIds Json @default("[]") @map("unsure_message_ids")
+  unsureCount      Int  @default(0) @map("unsure_count")
+
+  // Small sample of verified messages for display/debug
+  sample Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("verification_runs")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId, createdAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String   @map("conversation_id")
+  role           String // "user" | "assistant" | "system"
+  content        String   @db.Text
+  toolCalls      Json?    @map("tool_calls") // Store tool calls metadata
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  action      String // "search", "modify", "send", "label", etc.
+  target      String? // Message ID or label name
+  metadata    Json? // Additional context (query, recipients, etc.)
+  status      String // "success" | "error" | "pending"
+  errorDetail String?  @db.Text @map("error_detail")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
