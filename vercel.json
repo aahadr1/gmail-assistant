@@ -1,15 +1,5 @@
 {
   "buildCommand": "prisma generate && next build",
   "framework": "nextjs",
-  "regions": ["iad1"],
-  "env": {
-    "GOOGLE_CLIENT_ID": "@google_client_id",
-    "GOOGLE_CLIENT_SECRET": "@google_client_secret",
-    "NEXTAUTH_SECRET": "@nextauth_secret",
-    "NEXTAUTH_URL": "@nextauth_url",
-    "OPENAI_API_KEY": "@openai_api_key",
-    "OPENAI_MODEL": "gpt-4o",
-    "DATABASE_URL": "@database_url",
-    "TOKEN_ENCRYPTION_KEY": "@token_encryption_key"
-  }
+  "regions": ["iad1"]
 }
