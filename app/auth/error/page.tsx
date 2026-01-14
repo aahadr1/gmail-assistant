@@ -12,9 +12,22 @@ function ErrorContent() {
 
   return (
     <CardDescription>
-      {error === "AccessDenied"
-        ? "You denied access to the required permissions."
-        : "An error occurred during authentication."}
+      {error ? (
+        <>
+          <span className="block">
+            Authentication error: <span className="font-mono">{error}</span>
+          </span>
+          <span className="block mt-2">
+            Common causes in production: missing <span className="font-mono">DATABASE_URL</span>,{" "}
+            <span className="font-mono">NEXTAUTH_SECRET</span>, <span className="font-mono">NEXTAUTH_URL</span>,{" "}
+            or <span className="font-mono">TOKEN_ENCRYPTION_KEY</span>.
+          </span>
+        </>
+      ) : error === "AccessDenied" ? (
+        "You denied access to the required permissions."
+      ) : (
+        "An error occurred during authentication."
+      )}
     </CardDescription>
   );
 }

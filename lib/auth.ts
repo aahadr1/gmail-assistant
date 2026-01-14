@@ -14,6 +14,17 @@ const GMAIL_SCOPES = [
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as any,
+  logger: {
+    error(code, metadata) {
+      console.error("[nextauth][error]", code, metadata);
+    },
+    warn(code) {
+      console.warn("[nextauth][warn]", code);
+    },
+    debug(code, metadata) {
+      console.debug("[nextauth][debug]", code, metadata);
+    },
+  },
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -62,21 +73,27 @@ export const authOptions: NextAuthOptions = {
      */
     async linkAccount({ account }) {
       if (!account?.refresh_token) return;
+      try {
+        // If TOKEN_ENCRYPTION_KEY is missing/misconfigured, do not break sign-in.
+        // (Gmail actions will still require a proper token setup; we surface that later.)
+        const encrypted = encrypt(account.refresh_token);
 
-      const encrypted = encrypt(account.refresh_token);
-
-      await prisma.account.updateMany({
-        where: {
-          provider: account.provider,
-          providerAccountId: account.providerAccountId,
-        },
-        data: {
-          encrypted_refresh_token: encrypted.encrypted,
-          refresh_token_iv: encrypted.iv,
-          refresh_token_tag: encrypted.tag,
-          refresh_token: null,
-        },
-      });
+        await prisma.account.updateMany({
+          where: {
+            provider: account.provider,
+            providerAccountId: account.providerAccountId,
+          },
+          data: {
+            encrypted_refresh_token: encrypted.encrypted,
+            refresh_token_iv: encrypted.iv,
+            refresh_token_tag: encrypted.tag,
+            refresh_token: null,
+          },
+        });
+      } catch (err) {
+        console.error("[nextauth][linkAccount] failed to encrypt/store refresh token", err);
+        // Swallow to avoid auth loops in production due to env misconfig.
+      }
     },
   },
   pages: {

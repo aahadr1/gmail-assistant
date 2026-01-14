@@ -1,8 +1,22 @@
 "use client";
 
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+function ErrorBanner() {
+  const searchParams = useSearchParams();
+  const error = searchParams.get("error");
+
+  if (!error) return null;
+  return (
+    <CardDescription className="text-destructive">
+      Auth error: <span className="font-mono">{error}</span>
+    </CardDescription>
+  );
+}
 
 export default function SignInPage() {
   return (
@@ -13,6 +27,9 @@ export default function SignInPage() {
           <CardDescription>
             Sign in with your Google account to get started
           </CardDescription>
+          <Suspense fallback={null}>
+            <ErrorBanner />
+          </Suspense>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
