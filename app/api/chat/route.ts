@@ -5,6 +5,10 @@ import OpenAI from "openai";
 import { tools, executeTool } from "@/lib/ai/tools";
 import { prisma } from "@/lib/db/prisma";
 
+// Vercel Serverless Function tuning (prevents premature 504s for tool-heavy requests)
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
 function getOpenAI() {
@@ -17,6 +21,9 @@ function getOpenAI() {
 
 export async function POST(req: NextRequest) {
   try {
+    const startedAt = Date.now();
+    const TIME_BUDGET_MS = 50_000; // stay under platform timeout; return a friendly message instead of a 504
+
     const session = await getServerSession(authOptions);
     
     if (!session?.user?.id) {
@@ -84,7 +91,7 @@ Key guidelines:
 
     const currentMessages = [systemMessage, ...messages];
     let iterations = 0;
-    const MAX_ITERATIONS = 10;
+    const MAX_ITERATIONS = 6;
     let finalResponse = "";
     let lastVerificationRunId: string | null = null;
     let lastProposedAction: any = null;
@@ -94,13 +101,24 @@ Key guidelines:
     
     while (iterations < MAX_ITERATIONS) {
       iterations++;
+      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+        finalResponse =
+          finalResponse ||
+          "I started working on that, but it’s taking longer than expected and may time out. Please retry, or simplify the request (e.g. fewer queries / smaller batch).";
+        break;
+      }
 
-      const completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: currentMessages,
-        tools: tools as any,
-        tool_choice: "auto",
-      });
+      const completion = await Promise.race([
+        openai.chat.completions.create({
+          model: MODEL,
+          messages: currentMessages,
+          tools: tools as any,
+          tool_choice: "auto",
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("LLM request timed out")), 20_000)
+        ),
+      ]);
 
       const choice = completion.choices[0];
       const message = choice.message;
@@ -122,7 +140,12 @@ Key guidelines:
         console.log(`Executing tool: ${toolName}`, toolArgs);
 
         try {
-          const result = await executeTool(toolName, toolArgs);
+          const result = await Promise.race([
+            executeTool(toolName, toolArgs),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Tool timed out: ${toolName}`)), 25_000)
+            ),
+          ]);
           if (result?.verificationRunId && typeof result.verificationRunId === "string") {
             lastVerificationRunId = result.verificationRunId;
           }
